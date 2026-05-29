@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { runIngestion } from "@/lib/ingest";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300; // Vercel Pro: allow the full ingest + alert pass
 
 // Triggered on a schedule (Supabase / Vercel Cron) or manually.
 // Auth: send `Authorization: Bearer <CRON_SECRET>` or `?secret=<CRON_SECRET>`.

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { runSettlement } from "@/lib/settle";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300; // Vercel Pro
 
 function authorized(request: Request) {
   const secret = process.env.CRON_SECRET;

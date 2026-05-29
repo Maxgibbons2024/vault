@@ -7,7 +7,7 @@ import {
 } from "@/lib/notify/telegram";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300; // Vercel Pro
 
 // Manual trigger / cron for value-opportunity alerts.
 // Auth: `Authorization: Bearer <CRON_SECRET>` or `?secret=<CRON_SECRET>`.
