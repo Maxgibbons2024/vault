@@ -1,0 +1,90 @@
+// VaultBets AI database schema (Supabase Postgres).
+// Mirrors src/lib/types.ts. Run `npx prisma migrate deploy` / `db push` to apply.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String
+  password     String // store a bcrypt/argon2 hash in production
+  role         String        @default("user") // "user" | "admin"
+  createdAt    DateTime      @default(now())
+  subscription Subscription?
+}
+
+model Subscription {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan             String   @default("free") // "free" | "starter" | "pro"
+  status           String   @default("active") // "active" | "trialing" | "canceled"
+  currentPeriodEnd DateTime
+  stripeCustomerId String?
+}
+
+model Event {
+  id               String        @id @default(cuid())
+  externalId       String?       @unique // provider id for idempotent ingestion
+  sport            String // "football" | "tennis" | "ufc" | "horse-racing"
+  competition      String
+  homeName         String
+  awayName         String
+  startsAt         DateTime
+  venue            String?
+  marketConfidence Int           @default(60)
+  status           String        @default("scheduled") // scheduled | live | finished
+  analysis         Analysis?
+  opportunities    Opportunity[]
+
+  @@index([sport, startsAt])
+}
+
+model Analysis {
+  id          String   @id @default(cuid())
+  eventId     String   @unique
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  premium     Boolean  @default(true)
+  published   Boolean  @default(false)
+  publishedAt DateTime?
+  summary     String
+  sections    Json // AnalysisSection[]
+  generatedBy String   @default("template") // "template" | "claude"
+  updatedAt   DateTime @updatedAt
+}
+
+model Opportunity {
+  id           String  @id @default(cuid())
+  eventId      String
+  event        Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  market       String
+  bookmakerOdds Float
+  fairOdds     Float
+  edgePct      Float
+  confidence   Float
+  reasoning    String
+
+  @@index([eventId])
+}
+
+model Result {
+  id          String   @id @default(cuid())
+  date        DateTime
+  sport       String
+  event       String
+  opportunity String
+  marketOdds  Float
+  fairOdds    Float
+  status      String // "won" | "lost" | "pending"
+  roi         Float
+
+  @@index([date])
+}
