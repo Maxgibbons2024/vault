@@ -1,14 +1,18 @@
-// Settlement: grade finished events' opportunities into Result rows + ROI,
-// so the Analytics track record reflects real outcomes.
+// Settlement (Odds-API-led): grade finished events' opportunities into Result
+// rows + ROI using The Odds API /scores, so the Analytics track record is real.
 
-import { fetchFootballFixtures, apiFootballEnabled } from "./providers/api-football";
+import {
+  fetchScores,
+  listActiveSports,
+  oddsApiEnabled,
+} from "./providers/the-odds-api";
 import {
   addResult,
   listEvents,
   listOpportunitiesForEvent,
   updateEvent,
 } from "./store";
-import type { Opportunity, ResultStatus } from "./types";
+import type { Opportunity, ResultStatus, Sport } from "./types";
 
 export interface SettleSummary {
   enabled: boolean;
@@ -17,72 +21,91 @@ export interface SettleSummary {
   notes: string[];
 }
 
-// Decide win/lose for a single opportunity given the final score.
+function mapSport(key: string): Sport | null {
+  if (key.startsWith("soccer_")) return "football";
+  if (key.startsWith("tennis_")) return "tennis";
+  if (key.startsWith("mma")) return "ufc";
+  return null;
+}
+
+// Decide win/lose for one opportunity given the final score.
 function grade(
   op: Opportunity,
   home: string,
-  goalsHome: number,
-  goalsAway: number,
+  away: string,
+  homeScore: number,
+  awayScore: number,
 ): ResultStatus {
-  const total = goalsHome + goalsAway;
+  const total = homeScore + awayScore;
   const m = op.market.toLowerCase();
-  if (m === `${home.toLowerCase()} to win`) return goalsHome > goalsAway ? "won" : "lost";
-  if (m.endsWith("to win")) return goalsAway > goalsHome ? "won" : "lost";
+  if (m === "draw") return homeScore === awayScore ? "won" : "lost";
   if (m.includes("over 2.5")) return total > 2.5 ? "won" : "lost";
   if (m.includes("under 2.5")) return total < 2.5 ? "won" : "lost";
-  if (m.includes("over 1.5 team goals"))
-    return goalsHome >= 2 ? "won" : "lost"; // assumes home team total
+  if (m.endsWith("to win")) {
+    const team = op.market.slice(0, -" to win".length).trim().toLowerCase();
+    if (team === home.toLowerCase()) return homeScore > awayScore ? "won" : "lost";
+    if (team === away.toLowerCase()) return awayScore > homeScore ? "won" : "lost";
+  }
   return "pending";
 }
 
 export async function runSettlement(): Promise<SettleSummary> {
   const summary: SettleSummary = {
-    enabled: apiFootballEnabled,
+    enabled: oddsApiEnabled,
     finishedSeen: 0,
     graded: 0,
     notes: [],
   };
-  if (!apiFootballEnabled) {
-    summary.notes.push("API_FOOTBALL_KEY not set — settlement skipped.");
+  if (!oddsApiEnabled) {
+    summary.notes.push("ODDS_API_KEY not set — settlement skipped.");
     return summary;
   }
 
-  // Pull recent finished fixtures (look back a couple of days).
-  const season = Number(process.env.FOOTBALL_SEASON) || new Date().getUTCFullYear();
-  const from = process.env.FOOTBALL_FROM || undefined;
-  const to = process.env.FOOTBALL_TO || undefined;
-  const finished = (
-    await fetchFootballFixtures({ leagueIds: [39, 140, 2], season, toDays: 1, from, to })
-  ).filter((f) => f.status === "finished" && f.goalsHome != null && f.goalsAway != null);
-  summary.finishedSeen = finished.length;
+  const maxSports = Number(process.env.ODDS_MAX_SPORTS) || 6;
+  const active = (await listActiveSports())
+    .filter((s) => mapSport(s.key))
+    .slice(0, maxSports);
 
-  const events = await listEvents("football");
+  const events = await listEvents();
   const byExternal = new Map(events.map((e) => [e.externalId, e]));
 
-  for (const fx of finished) {
-    const event = byExternal.get(fx.externalId);
-    if (!event || event.status === "finished") continue;
+  for (const s of active) {
+    const scores = await fetchScores(s.key, 3);
+    for (const sc of scores) {
+      if (!sc.completed || !sc.scores) continue;
+      const event = byExternal.get(`oa_${sc.id}`);
+      if (!event || event.status === "finished") continue;
 
-    const ops = await listOpportunitiesForEvent(event.id);
-    for (const op of ops) {
-      const status = grade(op, fx.homeName, fx.goalsHome!, fx.goalsAway!);
-      const roi =
-        status === "won" ? Number(((op.bookmakerOdds - 1) * 100).toFixed(0))
-        : status === "lost" ? -100
-        : 0;
-      await addResult({
-        date: fx.startsAt,
-        sport: "football",
-        event: `${fx.homeName} vs ${fx.awayName}`,
-        opportunity: op.market,
-        marketOdds: op.bookmakerOdds,
-        fairOdds: op.fairOdds,
-        status,
-        roi,
-      });
-      summary.graded += 1;
+      const scoreMap = new Map(sc.scores.map((x) => [x.name, Number(x.score)]));
+      const homeScore = scoreMap.get(sc.home_team) ?? scoreMap.get(event.homeName);
+      const awayScore = scoreMap.get(sc.away_team) ?? scoreMap.get(event.awayName);
+      if (homeScore == null || awayScore == null || Number.isNaN(homeScore) || Number.isNaN(awayScore))
+        continue;
+
+      summary.finishedSeen += 1;
+      const ops = await listOpportunitiesForEvent(event.id);
+      for (const op of ops) {
+        const status = grade(op, sc.home_team, sc.away_team, homeScore, awayScore);
+        const roi =
+          status === "won"
+            ? Number(((op.bookmakerOdds - 1) * 100).toFixed(0))
+            : status === "lost"
+              ? -100
+              : 0;
+        await addResult({
+          date: event.startsAt,
+          sport: event.sport,
+          event: `${event.homeName} vs ${event.awayName}`,
+          opportunity: op.market,
+          marketOdds: op.bookmakerOdds,
+          fairOdds: op.fairOdds,
+          status,
+          roi,
+        });
+        summary.graded += 1;
+      }
+      await updateEvent(event.id, { status: "finished" });
     }
-    await updateEvent(event.id, { status: "finished" });
   }
   return summary;
 }

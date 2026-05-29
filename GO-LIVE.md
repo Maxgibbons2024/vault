@@ -8,8 +8,7 @@ falls back gracefully when they're absent.
 | Capability        | Enabled by                          | Fallback when unset            |
 | ----------------- | ----------------------------------- | ------------------------------ |
 | Persistence       | `DATABASE_URL` (Supabase)           | In-memory seed store           |
-| Live fixtures     | `API_FOOTBALL_KEY`                  | No live events ingested        |
-| Live odds         | `ODDS_API_KEY`                      | Model runs without market odds |
+| Live fixtures+odds | `ODDS_API_KEY` (The Odds API)      | No live events ingested        |
 | AI analysis       | `ANTHROPIC_API_KEY`                 | Deterministic template prose   |
 | Subscriptions     | `STRIPE_SECRET_KEY` + price IDs     | Demo plan activation (no charge)|
 | Scheduled jobs    | `CRON_SECRET` + a scheduler         | Manual trigger only            |
@@ -35,36 +34,38 @@ Copy `.env.example` → `.env.local` and fill in as you go.
 4. Restart the app. It now reads/writes Postgres. Inspect data with
    `npm run db:studio`.
 
-## 2. Live fixtures — API-Football
+## 2. Live fixtures + odds — The Odds API (primary source)
 
-1. Get a key at [api-football.com](https://www.api-football.com/) (free tier
-   available) and set `API_FOOTBALL_KEY`.
-2. Leagues pulled are configured in `src/lib/ingest.ts` (`FOOTBALL_LEAGUES`) —
-   defaults: Premier League (39), LaLiga (140), Champions League (2). Add more by
-   pairing each `leagueId` with its Odds API `oddsSportKey`.
+1. Get a free key at [the-odds-api.com](https://the-odds-api.com/) (~500 req/mo)
+   and set `ODDS_API_KEY`. Optionally `ODDS_REGIONS` (default `uk`) and
+   `ODDS_MAX_SPORTS` (default `6`).
+2. Ingestion (`src/lib/ingest.ts`) calls `/sports` for **active** competitions,
+   keeps those mapping to our UI sports (`soccer_*`→football, `tennis_*`→tennis,
+   `mma*`→ufc), pulls upcoming events **with odds**, and persists them. It
+   auto-adapts to whatever is in season — no league lists to maintain.
+3. **Quota:** each odds request costs `markets × regions` credits. Defaults keep
+   it small (1 region; `h2h` for most sports, `h2h,totals` for soccer). The cron
+   runs **daily** to stay within the free tier.
+4. Horse racing has no free source on The Odds API, so that tab stays on seed
+   data. (API-Football is optional/legacy — its free plan only covers seasons
+   2022–2024, so it cannot serve upcoming fixtures; keep it only for future paid
+   stats enrichment.)
 
-## 3. Live odds — The Odds API
-
-1. Get a key at [the-odds-api.com](https://the-odds-api.com/) and set
-   `ODDS_API_KEY`.
-2. The pipeline pulls `h2h` and `totals` markets, takes the best price across UK/EU
-   books, and matches them to fixtures by team name.
-
-## 4. AI analysis — Claude
+## 3. AI analysis — Claude
 
 1. Set `ANTHROPIC_API_KEY` (and optionally `ANTHROPIC_MODEL`).
 2. The static analysis rubric is sent with **prompt caching** (`cache_control`),
    so repeated generations are cheaper and faster. Per-match data is the only
    uncached part. See `src/lib/ai/analysis.ts`.
 
-## 5. The value engine (no key needed)
+## 4. The value engine (no key needed)
 
-`src/lib/models/football.ts` is a Poisson goals model: it turns expected goals
-into outcome probabilities, derives **fair odds = 1 / probability**, and computes
-**edge = bookmaker odds / fair odds − 1**. This is independent of the LLM — Claude
-only writes the prose. Improve it by feeding real team scoring/conceding rates
-into `estimateLambdas()` (wire richer API-Football stats endpoints into the
-ingestion step).
+`src/lib/models/devig.ts` is the generic value engine: for each market it strips
+each bookmaker's margin, averages to a **no-vig consensus fair probability**, then
+compares the **best available price** to that fair price — `edge = best / fair − 1`.
+This is standard line-shopping value and works for any sport with ≥2 books, no team
+stats required. (`src/lib/models/football.ts` keeps a Poisson goals model for when
+paid API-Football stats are wired in to sharpen football specifically.)
 
 ## 6. Run the pipeline
 
