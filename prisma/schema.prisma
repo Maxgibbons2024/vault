@@ -42,6 +42,7 @@ model Event {
   venue            String?
   marketConfidence Int           @default(60)
   status           String        @default("scheduled") // scheduled | live | finished
+  metrics          Json? // de-vig probabilities + market summary for charts
   analysis         Analysis?
   opportunities    Opportunity[]
 

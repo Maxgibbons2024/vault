@@ -34,9 +34,25 @@ export interface Subscription {
   stripeCustomerId?: string;
 }
 
+export interface MarketOutcome {
+  name: string; // raw outcome name (team / "Draw" / "Over" / "Under")
+  label: string; // display label
+  fairProb: number; // 0-1 no-vig consensus probability
+  fairOdds: number;
+  bestPrice: number; // best decimal price across books
+  edgePct: number;
+}
+
+export interface EventMetrics {
+  bookmakerCount: number;
+  outcomes: MarketOutcome[]; // h2h outcomes (2- or 3-way)
+  totals?: MarketOutcome[]; // over/under 2.5 (soccer)
+}
+
 export interface Event {
   id: string;
   externalId?: string | null; // provider id for idempotent ingestion
+  metrics?: EventMetrics | null;
   sport: Sport;
   competition: string;
   homeName: string;

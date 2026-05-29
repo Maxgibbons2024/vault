@@ -8,11 +8,8 @@ import {
   oddsApiEnabled,
 } from "./providers/the-odds-api";
 import { buildDevigOpportunities } from "./models/devig";
-import { generateAnalysis } from "./ai/analysis";
 import {
-  getAnalysisForEvent,
   replaceOpportunitiesForEvent,
-  upsertAnalysis,
   upsertEventByExternalId,
 } from "./store";
 import type { Sport } from "./types";
@@ -23,7 +20,6 @@ export interface IngestSummary {
   fixturesSeen: number;
   eventsUpserted: number;
   opportunitiesCreated: number;
-  analysesGenerated: number;
   notes: string[];
 }
 
@@ -35,6 +31,25 @@ function mapSport(key: string): Sport | null {
   return null;
 }
 
+// Marquee soccer competitions to prioritise (earlier = higher priority).
+const SOCCER_PRIORITY = [
+  "soccer_uefa_champs_league",
+  "soccer_fifa_world_cup",
+  "soccer_uefa_europa_league",
+  "soccer_conmebol_copa_libertadores",
+  "soccer_epl",
+  "soccer_spain_la_liga",
+  "soccer_italy_serie_a",
+  "soccer_germany_bundesliga",
+  "soccer_france_ligue_one",
+  "soccer_usa_mls",
+  "soccer_brazil_campeonato",
+];
+function soccerRank(key: string) {
+  const i = SOCCER_PRIORITY.indexOf(key);
+  return i === -1 ? SOCCER_PRIORITY.length + 1 : i;
+}
+
 export async function runIngestion(): Promise<IngestSummary> {
   const summary: IngestSummary = {
     enabled: { fixtures: oddsApiEnabled, odds: oddsApiEnabled },
@@ -42,7 +57,6 @@ export async function runIngestion(): Promise<IngestSummary> {
     fixturesSeen: 0,
     eventsUpserted: 0,
     opportunitiesCreated: 0,
-    analysesGenerated: 0,
     notes: [],
   };
 
@@ -53,18 +67,21 @@ export async function runIngestion(): Promise<IngestSummary> {
     return summary;
   }
 
-  const maxSports = Number(process.env.ODDS_MAX_SPORTS) || 6;
+  const maxSports = Number(process.env.ODDS_MAX_SPORTS) || 8;
+  const maxEvents = Number(process.env.ODDS_MAX_EVENTS_PER_SPORT) || 12;
   const active = await listActiveSports();
   const all = active
     .map((s) => ({ info: s, sport: mapSport(s.key) }))
     .filter((x): x is { info: (typeof active)[number]; sport: Sport } => !!x.sport);
 
   // Round-robin across sports so tennis/ufc/football all get coverage within the
-  // quota cap, instead of one sport dominating the raw API order.
+  // quota cap; football is ordered by marquee priority (UCL, World Cup, ...).
   const groups: Record<Sport, typeof all> = {
     ufc: all.filter((x) => x.sport === "ufc"),
     tennis: all.filter((x) => x.sport === "tennis"),
-    football: all.filter((x) => x.sport === "football"),
+    football: all
+      .filter((x) => x.sport === "football")
+      .sort((a, b) => soccerRank(a.info.key) - soccerRank(b.info.key)),
     "horse-racing": [],
   };
   const order: Sport[] = ["ufc", "tennis", "football"];
@@ -92,13 +109,14 @@ export async function runIngestion(): Promise<IngestSummary> {
   for (const { info, sport } of mapped) {
     summary.sportsPulled.push(info.key);
     const markets = sport === "football" ? "h2h,totals" : "h2h";
-    const events = await fetchEventsWithOdds(info.key, { markets });
+    const events = (await fetchEventsWithOdds(info.key, { markets }))
+      .filter((e) => e.bookmakers?.length)
+      .sort((a, b) => +new Date(a.commence_time) - +new Date(b.commence_time))
+      .slice(0, maxEvents); // soonest N per sport (bounds runtime + quota)
     summary.fixturesSeen += events.length;
 
     for (const ev of events) {
-      if (!ev.bookmakers?.length) continue;
-
-      const { opportunities, marketConfidence } = buildDevigOpportunities(
+      const { opportunities, marketConfidence, metrics } = buildDevigOpportunities(
         ev.home_team,
         ev.away_team,
         ev.bookmakers,
@@ -115,42 +133,13 @@ export async function runIngestion(): Promise<IngestSummary> {
         venue: undefined,
         marketConfidence,
         status: "scheduled",
+        metrics,
       });
       summary.eventsUpserted += 1;
 
       await replaceOpportunitiesForEvent(event.id, opportunities);
       summary.opportunitiesCreated += opportunities.length;
-
-      // Generate prose once per event (first time we see it); odds/opps refresh
-      // on every run, but we don't regenerate the (costly) analysis each time.
-      const existing = await getAnalysisForEvent(event.id);
-      if (!existing) {
-        const generated = await generateAnalysis({
-          sport,
-          competition: ev.sport_title,
-          homeName: ev.home_team,
-          awayName: ev.away_team,
-          startsAt: ev.commence_time,
-          facts: { bookmakers: ev.bookmakers.length, marketConfidence },
-          opportunities: opportunities.map((o) => ({
-            market: o.market,
-            bookmakerOdds: o.bookmakerOdds,
-            fairOdds: o.fairOdds,
-            edgePct: o.edgePct,
-          })),
-        });
-        await upsertAnalysis({
-          id: `an_${event.id}`,
-          eventId: event.id,
-          premium: true,
-          published: true,
-          publishedAt: new Date().toISOString(),
-          summary: generated.summary,
-          sections: generated.sections,
-          generatedBy: generated.generatedBy,
-        });
-        summary.analysesGenerated += 1;
-      }
+      // Analysis prose is generated lazily on first view (see analysis-service).
     }
   }
 

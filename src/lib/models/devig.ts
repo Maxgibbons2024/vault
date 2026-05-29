@@ -7,6 +7,7 @@
 
 import type { OddsBookmaker } from "../providers/the-odds-api";
 import type { ModeledOpportunity } from "./football";
+import type { EventMetrics, MarketOutcome } from "../types";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -69,6 +70,11 @@ function confidenceFor(edge: number, books: number) {
 export interface DevigResult {
   opportunities: ModeledOpportunity[];
   marketConfidence: number; // 0-100, from the favourite's consensus probability
+  metrics: EventMetrics;
+}
+
+function h2hLabel(name: string) {
+  return name.toLowerCase() === "draw" ? "Draw" : name;
 }
 
 export function buildDevigOpportunities(
@@ -79,12 +85,15 @@ export function buildDevigOpportunities(
 ): DevigResult {
   const minEdge = opts.minEdge ?? 3;
   const opportunities: ModeledOpportunity[] = [];
+  const outcomes: MarketOutcome[] = [];
+  const totals: MarketOutcome[] = [];
   let topProb = 0;
+  let bookmakerCount = 0;
 
   // ----- h2h (moneyline). Soccer adds a Draw outcome. -----
   const h2hBooks = pricesByMarket(bookmakers, "h2h");
   if (h2hBooks.length) {
-    // Outcome names are exactly the team names (+ "Draw") as returned by the API.
+    bookmakerCount = h2hBooks.length;
     const names = new Set<string>();
     for (const b of h2hBooks) Object.keys(b.prices).forEach((n) => names.add(n));
     const devig = devigMarket(h2hBooks, [...names]);
@@ -92,17 +101,25 @@ export function buildDevigOpportunities(
       topProb = Math.max(topProb, d.fairProb);
       const fairOdds = d.fairProb > 0 ? 1 / d.fairProb : Infinity;
       const edge = (d.bestPrice / fairOdds - 1) * 100;
-      if (edge < minEdge) continue;
-      const label =
-        name.toLowerCase() === "draw" ? "Draw" : `${name} to win`;
-      opportunities.push({
-        market: label,
-        bookmakerOdds: Number(d.bestPrice.toFixed(2)),
+      const label = name.toLowerCase() === "draw" ? "Draw" : `${name} to win`;
+      outcomes.push({
+        name: h2hLabel(name),
+        label,
+        fairProb: Number(d.fairProb.toFixed(4)),
         fairOdds: Number(fairOdds.toFixed(2)),
+        bestPrice: Number(d.bestPrice.toFixed(2)),
         edgePct: Number(edge.toFixed(0)),
-        confidence: confidenceFor(edge, d.books),
-        reasoning: `Best price ${d.bestPrice.toFixed(2)} vs no-vig consensus ${fairOdds.toFixed(2)} (${(d.fairProb * 100).toFixed(0)}% fair) across ${d.books} bookmakers.`,
       });
+      if (edge >= minEdge) {
+        opportunities.push({
+          market: label,
+          bookmakerOdds: Number(d.bestPrice.toFixed(2)),
+          fairOdds: Number(fairOdds.toFixed(2)),
+          edgePct: Number(edge.toFixed(0)),
+          confidence: confidenceFor(edge, d.books),
+          reasoning: `Best price ${d.bestPrice.toFixed(2)} vs no-vig consensus ${fairOdds.toFixed(2)} (${(d.fairProb * 100).toFixed(0)}% fair) across ${d.books} bookmakers.`,
+        });
+      }
     }
   }
 
@@ -113,19 +130,32 @@ export function buildDevigOpportunities(
     for (const [name, d] of devig) {
       const fairOdds = d.fairProb > 0 ? 1 / d.fairProb : Infinity;
       const edge = (d.bestPrice / fairOdds - 1) * 100;
-      if (edge < minEdge) continue;
-      opportunities.push({
-        market: `${name} 2.5 Goals`,
-        bookmakerOdds: Number(d.bestPrice.toFixed(2)),
+      totals.push({
+        name,
+        label: `${name} 2.5 Goals`,
+        fairProb: Number(d.fairProb.toFixed(4)),
         fairOdds: Number(fairOdds.toFixed(2)),
+        bestPrice: Number(d.bestPrice.toFixed(2)),
         edgePct: Number(edge.toFixed(0)),
-        confidence: confidenceFor(edge, d.books),
-        reasoning: `Best price ${d.bestPrice.toFixed(2)} vs no-vig consensus ${fairOdds.toFixed(2)} for ${name.toLowerCase()} 2.5 across ${d.books} bookmakers.`,
       });
+      if (edge >= minEdge) {
+        opportunities.push({
+          market: `${name} 2.5 Goals`,
+          bookmakerOdds: Number(d.bestPrice.toFixed(2)),
+          fairOdds: Number(fairOdds.toFixed(2)),
+          edgePct: Number(edge.toFixed(0)),
+          confidence: confidenceFor(edge, d.books),
+          reasoning: `Best price ${d.bestPrice.toFixed(2)} vs no-vig consensus ${fairOdds.toFixed(2)} for ${name.toLowerCase()} 2.5 across ${d.books} bookmakers.`,
+        });
+      }
     }
   }
 
   opportunities.sort((a, b) => b.edgePct - a.edgePct);
   const marketConfidence = topProb > 0 ? clamp(Math.round(topProb * 100), 30, 95) : 50;
-  return { opportunities, marketConfidence };
+  return {
+    opportunities,
+    marketConfidence,
+    metrics: { bookmakerCount, outcomes, totals: totals.length ? totals : undefined },
+  };
 }

@@ -39,6 +39,7 @@ const toSub = (r: any): Subscription => ({
 const toEvent = (r: any): Event => ({
   id: r.id,
   externalId: r.externalId ?? undefined,
+  metrics: (r.metrics as Event["metrics"]) ?? null,
   sport: r.sport as Sport,
   competition: r.competition,
   homeName: r.homeName,
@@ -246,6 +247,8 @@ export const prismaRepo: Repo = {
 function eventData(input: Omit<Event, "id">) {
   return {
     externalId: input.externalId ?? null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    metrics: (input.metrics ?? undefined) as any,
     sport: input.sport,
     competition: input.competition,
     homeName: input.homeName,

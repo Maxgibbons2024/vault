@@ -97,16 +97,16 @@ export async function listEventsWithMeta(sport?: Sport): Promise<EventWithMeta[]
 
 /* ------------------------------ Aggregates ------------------------------ */
 export async function dashboardStats() {
-  const [events, analyses, opportunities] = await Promise.all([
+  const [events, opportunities] = await Promise.all([
     repo.listEvents(),
-    repo.listAnalyses(),
     repo.listOpportunities(),
   ]);
   const today = new Date().toDateString();
   const eventsToday = events.filter(
     (e) => new Date(e.startsAt).toDateString() === today,
   ).length;
-  const analysisPublished = analyses.filter((a) => a.published).length;
+  // Every event has an analysis available (generated on first view).
+  const analysisPublished = events.length;
   const valueOpportunities = opportunities.length;
   const sportsCovered = new Set(events.map((e) => e.sport)).size;
   return { eventsToday, analysisPublished, valueOpportunities, sportsCovered };
