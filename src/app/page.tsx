@@ -1,5 +1,9 @@
 import Link from "next/link";
 import { Logo, Disclaimer } from "@/components/brand";
+
+// Render at request time (reads live data); avoids a build-time DB query.
+export const dynamic = "force-dynamic";
+
 import { Badge, ButtonLink, Card, SectionHeading } from "@/components/ui";
 import { PricingCards } from "@/components/pricing";
 import { SPORTS } from "@/lib/types";
