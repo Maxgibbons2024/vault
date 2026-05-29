@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { runValueAlerts } from "@/lib/notify/value-alerts";
-import { sendTelegramMessage, telegramEnabled } from "@/lib/notify/telegram";
+import {
+  postAndPinLegend,
+  sendTelegramMessage,
+  telegramEnabled,
+} from "@/lib/notify/telegram";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -21,6 +25,17 @@ async function handle(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const url = new URL(request.url);
+
+  if (url.searchParams.get("legend") === "1") {
+    if (!telegramEnabled) {
+      return NextResponse.json(
+        { ok: false, error: "Telegram not configured." },
+        { status: 400 },
+      );
+    }
+    const ok = await postAndPinLegend();
+    return NextResponse.json({ ok, legend: true });
+  }
 
   if (url.searchParams.get("test") === "1") {
     if (!telegramEnabled) {
