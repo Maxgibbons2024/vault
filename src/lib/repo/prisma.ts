@@ -162,6 +162,8 @@ export const prismaRepo: Repo = {
       data: {
         ...patch,
         startsAt: patch.startsAt ? new Date(patch.startsAt) : undefined,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        metrics: patch.metrics === undefined ? undefined : (patch.metrics as any),
       },
     });
     return toEvent(r);
