@@ -50,4 +50,8 @@ export interface Repo {
   // results
   listResults(): Promise<ResultRow[]>;
   addResult(row: Omit<ResultRow, "id">): Promise<ResultRow>;
+
+  // sent alerts (Telegram dedupe)
+  hasSentAlert(key: string): Promise<boolean>;
+  recordSentAlert(key: string): Promise<void>;
 }

@@ -244,6 +244,17 @@ export const prismaRepo: Repo = {
     });
     return toResult(r);
   },
+
+  async hasSentAlert(key) {
+    return !!(await db.sentAlert.findUnique({ where: { key } }));
+  },
+  async recordSentAlert(key) {
+    await db.sentAlert.upsert({
+      where: { key },
+      update: {},
+      create: { key },
+    });
+  },
 };
 
 function eventData(input: Omit<Event, "id">) {

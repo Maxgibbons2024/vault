@@ -26,6 +26,7 @@ interface DB {
   analyses: Analysis[];
   opportunities: Opportunity[];
   results: ResultRow[];
+  sentAlerts: Set<string>;
 }
 
 const g = globalThis as unknown as { __vaultbetsDB?: DB };
@@ -38,6 +39,7 @@ function freshDB(): DB {
     analyses: structuredClone(seedAnalyses),
     opportunities: structuredClone(seedOpportunities),
     results: structuredClone(seedResults),
+    sentAlerts: new Set<string>(),
   };
 }
 
@@ -173,5 +175,12 @@ export const memoryRepo: Repo = {
     const result: ResultRow = { ...row, id: rid("r") };
     db.results.push(result);
     return result;
+  },
+
+  async hasSentAlert(key) {
+    return db.sentAlerts.has(key);
+  },
+  async recordSentAlert(key) {
+    db.sentAlerts.add(key);
   },
 };

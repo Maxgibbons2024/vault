@@ -62,6 +62,10 @@ export const replaceOpportunitiesForEvent: Repo["replaceOpportunitiesForEvent"] 
 export const listResults = () => repo.listResults();
 export const addResult: Repo["addResult"] = (row) => repo.addResult(row);
 
+/* ------------------------------ Sent alerts ----------------------------- */
+export const hasSentAlert = (key: string) => repo.hasSentAlert(key);
+export const recordSentAlert = (key: string) => repo.recordSentAlert(key);
+
 /* --------------------------- Composed reads ----------------------------- */
 export interface EventWithMeta {
   event: Event;

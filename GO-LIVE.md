@@ -10,6 +10,7 @@ falls back gracefully when they're absent.
 | Persistence       | `DATABASE_URL` (Supabase)           | In-memory seed store           |
 | Live fixtures+odds | `ODDS_API_KEY` (The Odds API)      | No live events ingested        |
 | AI analysis       | `ANTHROPIC_API_KEY`                 | Deterministic template prose   |
+| Telegram alerts   | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHANNEL_ID` | No posts sent        |
 | Subscriptions     | `STRIPE_SECRET_KEY` + price IDs     | Demo plan activation (no charge)|
 | Scheduled jobs    | `CRON_SECRET` + a scheduler         | Manual trigger only            |
 
@@ -50,6 +51,20 @@ Copy `.env.example` → `.env.local` and fill in as you go.
    data. (API-Football is optional/legacy — its free plan only covers seasons
    2022–2024, so it cannot serve upcoming fixtures; keep it only for future paid
    stats enrichment.)
+
+## 2b. Telegram channel alerts
+
+Posts each new value opportunity (edge ≥ `TELEGRAM_MIN_EDGE`, default 5%) to a
+Telegram channel, folded into the daily ingest run. Idempotent (a `SentAlert`
+table prevents reposting).
+
+1. In Telegram, message **@BotFather** → `/newbot` → copy the token → `TELEGRAM_BOT_TOKEN`.
+2. Create a channel → add the bot as an **Administrator** with "Post messages".
+3. `TELEGRAM_CHANNEL_ID`: public channel = `@yourchannel`; private = the `-100…` id.
+4. Optional: `TELEGRAM_MIN_EDGE` (default 5), `TELEGRAM_MAX_ALERTS` (default 15).
+5. Confirm wiring: `curl -X POST "$URL/api/telegram/notify?test=1&secret=$CRON_SECRET"`
+   → a test message should appear in the channel. Then real picks post on each
+   ingest, or manually via `/api/telegram/notify`.
 
 ## 3. AI analysis — Claude
 

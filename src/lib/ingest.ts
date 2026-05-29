@@ -12,6 +12,7 @@ import {
   replaceOpportunitiesForEvent,
   upsertEventByExternalId,
 } from "./store";
+import { runValueAlerts } from "./notify/value-alerts";
 import type { Sport } from "./types";
 
 export interface IngestSummary {
@@ -141,6 +142,14 @@ export async function runIngestion(): Promise<IngestSummary> {
       summary.opportunitiesCreated += opportunities.length;
       // Analysis prose is generated lazily on first view (see analysis-service).
     }
+  }
+
+  // Push new value picks to Telegram (guarded — never breaks ingestion).
+  try {
+    const alerts = await runValueAlerts();
+    if (alerts.enabled) summary.notes.push(`telegram: sent ${alerts.sent}`);
+  } catch (err) {
+    summary.notes.push(`telegram error: ${(err as Error).message}`);
   }
 
   return summary;

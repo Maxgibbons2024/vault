@@ -76,6 +76,14 @@ model Opportunity {
   @@index([eventId])
 }
 
+model SentAlert {
+  id     String   @id @default(cuid())
+  key    String   @unique // "<event.externalId>:<market>" — stable across re-ingests
+  sentAt DateTime @default(now())
+
+  @@index([sentAt])
+}
+
 model Result {
   id          String   @id @default(cuid())
   date        DateTime
