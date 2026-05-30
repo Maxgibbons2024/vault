@@ -10,10 +10,9 @@ export async function ensureAnalysis(event: Event): Promise<Analysis> {
   if (existing) return existing;
 
   const opportunities = await listOpportunitiesForEvent(event.id);
-  const probabilities: Record<string, number> = {};
-  for (const o of event.metrics?.outcomes ?? []) {
-    probabilities[o.name] = o.fairProb;
-  }
+  const metrics = event.metrics;
+  const outcomes = metrics?.outcomes ?? [];
+  const favourite = [...outcomes].sort((a, b) => b.fairProb - a.fairProb)[0];
 
   const generated = await generateAnalysis({
     sport: event.sport,
@@ -21,16 +20,23 @@ export async function ensureAnalysis(event: Event): Promise<Analysis> {
     homeName: event.homeName,
     awayName: event.awayName,
     startsAt: event.startsAt,
-    facts: {
-      bookmakers: event.metrics?.bookmakerCount ?? 0,
-      marketConfidence: event.marketConfidence,
-    },
-    probabilities,
+    venue: event.venue ?? null,
+    market: metrics
+      ? {
+          bookmakerCount: metrics.bookmakerCount,
+          outcomes,
+          totals: metrics.totals,
+          favourite: favourite
+            ? { name: favourite.name, prob: favourite.fairProb }
+            : undefined,
+        }
+      : undefined,
     opportunities: opportunities.map((o) => ({
       market: o.market,
       bookmakerOdds: o.bookmakerOdds,
       fairOdds: o.fairOdds,
       edgePct: o.edgePct,
+      confidence: o.confidence,
     })),
   });
 
