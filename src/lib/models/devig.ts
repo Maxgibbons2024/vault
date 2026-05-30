@@ -55,10 +55,23 @@ function pricesByMarket(
     .filter((x): x is BookPrices => x !== null);
 }
 
-// No-vig average across all books — best price + fallback fair probability.
+// Minimum fair probability to flag as a pick. Below this, an outcome is a
+// longshot where % edge is dominated by noise/stale prices, not real value.
+const MIN_PROB = Number(process.env.ODDS_MIN_PROB) || 0.1;
+
+// Outlier-resistant best price: if the single highest price is well above the
+// next best, it's likely one stale/erroneous book you can't actually get matched
+// at — drop it and use the second-best as the actionable price.
+function usableBest(prices: number[]): number {
+  const s = [...prices].sort((a, b) => b - a);
+  if (s.length >= 2 && s[0] > s[1] * 1.15) return s[1];
+  return s[0] ?? 0;
+}
+
+// No-vig average across all books — collects prices + fallback fair probability.
 function consensus(books: BookPrices[], names: string[]) {
-  const agg = new Map<string, { bestPrice: number; probSum: number; books: number }>();
-  for (const n of names) agg.set(n, { bestPrice: 0, probSum: 0, books: 0 });
+  const agg = new Map<string, { prices: number[]; probSum: number; books: number }>();
+  for (const n of names) agg.set(n, { prices: [], probSum: 0, books: 0 });
   for (const book of books) {
     if (!names.every((n) => book.prices[n] > 1)) continue;
     const overround = names.reduce((s, n) => s + 1 / book.prices[n], 0);
@@ -67,7 +80,7 @@ function consensus(books: BookPrices[], names: string[]) {
       const a = agg.get(n)!;
       a.probSum += 1 / book.prices[n] / overround;
       a.books += 1;
-      a.bestPrice = Math.max(a.bestPrice, book.prices[n]);
+      a.prices.push(book.prices[n]);
     }
   }
   return agg;
@@ -113,7 +126,7 @@ function resolveMarket(
     return {
       name: n,
       fairProb: sharp ? sharp.probs[n] : a.probSum / a.books,
-      bestPrice: a.bestPrice,
+      bestPrice: usableBest(a.prices),
       bookCount: a.books,
     };
   });
@@ -169,7 +182,7 @@ export function buildDevigOpportunities(
         bestPrice: Number(r.bestPrice.toFixed(2)),
         edgePct: Number(edge.toFixed(0)),
       });
-      if (edge >= minEdge) {
+      if (edge >= minEdge && r.fairProb >= MIN_PROB) {
         opportunities.push({
           market: label,
           bookmakerOdds: Number(r.bestPrice.toFixed(2)),
@@ -197,7 +210,7 @@ export function buildDevigOpportunities(
         bestPrice: Number(r.bestPrice.toFixed(2)),
         edgePct: Number(edge.toFixed(0)),
       });
-      if (edge >= minEdge) {
+      if (edge >= minEdge && r.fairProb >= MIN_PROB) {
         opportunities.push({
           market: `${r.name} 2.5 Goals`,
           bookmakerOdds: Number(r.bestPrice.toFixed(2)),
