@@ -58,6 +58,10 @@ function pricesByMarket(
 // Minimum fair probability to flag as a pick. Below this, an outcome is a
 // longshot where % edge is dominated by noise/stale prices, not real value.
 const MIN_PROB = Number(process.env.ODDS_MIN_PROB) || 0.1;
+// Above this, heavy favourites where a high price is usually a stale/limit-down
+// book rather than real value.
+const MAX_PROB = Number(process.env.ODDS_MAX_PROB) || 0.9;
+const inBand = (p: number) => p >= MIN_PROB && p <= MAX_PROB;
 
 // Outlier-resistant best price: if the single highest price is well above the
 // next best, it's likely one stale/erroneous book you can't actually get matched
@@ -182,7 +186,7 @@ export function buildDevigOpportunities(
         bestPrice: Number(r.bestPrice.toFixed(2)),
         edgePct: Number(edge.toFixed(0)),
       });
-      if (edge >= minEdge && r.fairProb >= MIN_PROB) {
+      if (edge >= minEdge && inBand(r.fairProb)) {
         opportunities.push({
           market: label,
           bookmakerOdds: Number(r.bestPrice.toFixed(2)),
@@ -210,7 +214,7 @@ export function buildDevigOpportunities(
         bestPrice: Number(r.bestPrice.toFixed(2)),
         edgePct: Number(edge.toFixed(0)),
       });
-      if (edge >= minEdge && r.fairProb >= MIN_PROB) {
+      if (edge >= minEdge && inBand(r.fairProb)) {
         opportunities.push({
           market: `${r.name} 2.5 Goals`,
           bookmakerOdds: Number(r.bestPrice.toFixed(2)),
