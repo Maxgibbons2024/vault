@@ -14,7 +14,12 @@ export async function POST(request: Request) {
   const res = NextResponse.json({
     ok: true,
     user: { id: user.id, name: user.name, role: user.role },
-    redirect: user.role === "admin" ? "/admin" : "/dashboard",
+    redirect:
+      user.role === "platform_admin"
+        ? "/platform"
+        : user.role === "tenant_admin"
+          ? "/admin"
+          : "/dashboard",
   });
   res.cookies.set(SESSION_COOKIE, user.id, {
     httpOnly: true,

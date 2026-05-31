@@ -121,7 +121,9 @@ export async function runIngestion(): Promise<IngestSummary> {
         ev.home_team,
         ev.away_team,
         ev.bookmakers,
-        { sport },
+        // Low base edge: build a rich GLOBAL pool; each tenant's strategy applies
+        // its own (higher) minEdge via selectForTenant.
+        { sport, minEdge: Number(process.env.ODDS_BASE_MIN_EDGE) || 1 },
       );
 
       const event = await upsertEventByExternalId({
@@ -144,12 +146,14 @@ export async function runIngestion(): Promise<IngestSummary> {
     }
   }
 
-  // Push new value picks to Telegram (guarded — never breaks ingestion).
+  // Per-tenant pick recording + Telegram (guarded — never breaks ingestion).
   try {
     const alerts = await runValueAlerts();
-    if (alerts.enabled) summary.notes.push(`telegram: sent ${alerts.sent}`);
+    summary.notes.push(
+      `tenants ${alerts.tenants}, picks ${alerts.picksRecorded}, telegram sent ${alerts.sent}`,
+    );
   } catch (err) {
-    summary.notes.push(`telegram error: ${(err as Error).message}`);
+    summary.notes.push(`alerts error: ${(err as Error).message}`);
   }
 
   return summary;

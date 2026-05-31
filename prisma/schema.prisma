@@ -11,24 +11,67 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// A tipster's white-label instance: branding + strategy + channel + subscribers.
+model Tenant {
+  id                String       @id @default(cuid())
+  slug              String       @unique
+  name              String
+  status            String       @default("active") // active | paused
+  brand             Json // { brand, brandSoft, accent, logoText, tagline }
+  strategy          Json // { sports, markets, minEdge, minProb, maxProb, maxPicks }
+  telegramBotToken  String?
+  telegramChannelId String?
+  customDomain      String?      @unique
+  createdAt         DateTime     @default(now())
+  users             User[]
+  picks             TenantPick[]
+}
+
 model User {
   id           String        @id @default(cuid())
+  tenantId     String? // null = platform-level (platform_admin)
+  tenant       Tenant?       @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   email        String        @unique
   name         String
   password     String // store a bcrypt/argon2 hash in production
-  role         String        @default("user") // "user" | "admin"
+  role         String        @default("user") // "user" | "tenant_admin" | "platform_admin"
   createdAt    DateTime      @default(now())
   subscription Subscription?
+
+  @@index([tenantId])
 }
 
 model Subscription {
   id               String   @id @default(cuid())
   userId           String   @unique
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId         String?
   plan             String   @default("free") // "free" | "starter" | "pro"
   status           String   @default("active") // "active" | "trialing" | "canceled"
   currentPeriodEnd DateTime
   stripeCustomerId String?
+}
+
+// Per-tenant pick ledger: dedupe + Telegram state + settled track record.
+model TenantPick {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  eventId        String
+  market         String
+  bestPrice      Float
+  fairOdds       Float
+  edgePct        Float
+  confidence     Float
+  reasoning      String
+  status         String    @default("pending") // pending | won | lost | void
+  roi            Float     @default(0)
+  createdAt      DateTime  @default(now())
+  telegramSentAt DateTime?
+  settledAt      DateTime?
+
+  @@unique([tenantId, eventId, market])
+  @@index([tenantId, status])
 }
 
 model Event {
@@ -74,14 +117,6 @@ model Opportunity {
   reasoning    String
 
   @@index([eventId])
-}
-
-model SentAlert {
-  id     String   @id @default(cuid())
-  key    String   @unique // "<event.externalId>:<market>" — stable across re-ingests
-  sentAt DateTime @default(now())
-
-  @@index([sentAt])
 }
 
 model Result {

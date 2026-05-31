@@ -11,7 +11,7 @@ export default async function AdminLayout({
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  if (user.role !== "admin") redirect("/dashboard");
+  if (user.role === "user") redirect("/dashboard");
 
   const nav = [
     { href: "/admin", label: "Overview" },

@@ -3,10 +3,13 @@ import type {
   Analysis,
   Event,
   Opportunity,
+  PickStatus,
   PlanId,
   ResultRow,
   Sport,
   Subscription,
+  Tenant,
+  TenantPick,
   User,
 } from "../types";
 import {
@@ -15,31 +18,34 @@ import {
   seedOpportunities,
   seedResults,
   seedSubscriptions,
+  seedTenants,
   seedUsers,
 } from "../seed";
 
 // In-memory implementation. Persisted on globalThis so it survives HMR in dev.
 interface DB {
+  tenants: Tenant[];
   users: User[];
   subscriptions: Subscription[];
   events: Event[];
   analyses: Analysis[];
   opportunities: Opportunity[];
   results: ResultRow[];
-  sentAlerts: Set<string>;
+  tenantPicks: TenantPick[];
 }
 
 const g = globalThis as unknown as { __vaultbetsDB?: DB };
 
 function freshDB(): DB {
   return {
+    tenants: structuredClone(seedTenants),
     users: structuredClone(seedUsers),
     subscriptions: structuredClone(seedSubscriptions),
     events: structuredClone(seedEvents),
     analyses: structuredClone(seedAnalyses),
     opportunities: structuredClone(seedOpportunities),
     results: structuredClone(seedResults),
-    sentAlerts: new Set<string>(),
+    tenantPicks: [],
   };
 }
 
@@ -49,28 +55,50 @@ const rid = (prefix: string) =>
   `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 
 export const memoryRepo: Repo = {
+  async listTenants() {
+    return [...db.tenants];
+  },
+  async getTenant(id) {
+    return db.tenants.find((t) => t.id === id);
+  },
+  async getTenantBySlug(slug) {
+    return db.tenants.find((t) => t.slug === slug);
+  },
+  async createTenant(input) {
+    const tenant: Tenant = { ...input, id: rid("ten"), createdAt: new Date().toISOString() };
+    db.tenants.push(tenant);
+    return tenant;
+  },
+  async updateTenant(id, patch) {
+    const t = db.tenants.find((x) => x.id === id);
+    if (t) Object.assign(t, patch);
+    return t;
+  },
+
   async getUserByEmail(email) {
     return db.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
   },
   async getUserById(id) {
     return db.users.find((u) => u.id === id);
   },
-  async listUsers() {
-    return [...db.users];
+  async listUsers(tenantId) {
+    return db.users.filter((u) => (tenantId ? u.tenantId === tenantId : true));
   },
   async createUser(input) {
     const user: User = {
       id: rid("u"),
+      tenantId: input.tenantId ?? null,
       email: input.email,
       name: input.name,
       password: input.password,
-      role: "user",
+      role: input.role ?? "user",
       createdAt: new Date().toISOString(),
     };
     db.users.push(user);
     db.subscriptions.push({
       id: rid("sub"),
       userId: user.id,
+      tenantId: input.tenantId ?? null,
       plan: "free",
       status: "trialing",
       currentPeriodEnd: new Date(Date.now() + 14 * 864e5).toISOString(),
@@ -81,8 +109,8 @@ export const memoryRepo: Repo = {
   async getSubscriptionForUser(userId) {
     return db.subscriptions.find((s) => s.userId === userId);
   },
-  async listSubscriptions() {
-    return [...db.subscriptions];
+  async listSubscriptions(tenantId) {
+    return db.subscriptions.filter((s) => (tenantId ? s.tenantId === tenantId : true));
   },
   async setPlanForUser(userId, plan: PlanId) {
     const sub = db.subscriptions.find((s) => s.userId === userId);
@@ -177,10 +205,51 @@ export const memoryRepo: Repo = {
     return result;
   },
 
-  async hasSentAlert(key) {
-    return db.sentAlerts.has(key);
+  async upsertTenantPick(pick) {
+    const existing = db.tenantPicks.find(
+      (p) => p.tenantId === pick.tenantId && p.eventId === pick.eventId && p.market === pick.market,
+    );
+    if (existing) {
+      existing.bestPrice = pick.bestPrice;
+      existing.fairOdds = pick.fairOdds;
+      existing.edgePct = pick.edgePct;
+      existing.confidence = pick.confidence;
+      existing.reasoning = pick.reasoning;
+      return existing;
+    }
+    const created: TenantPick = {
+      ...pick,
+      id: rid("tp"),
+      status: "pending",
+      roi: 0,
+      createdAt: new Date().toISOString(),
+      telegramSentAt: null,
+      settledAt: null,
+    };
+    db.tenantPicks.push(created);
+    return created;
   },
-  async recordSentAlert(key) {
-    db.sentAlerts.add(key);
+  async listTenantPicks(tenantId, opts) {
+    return db.tenantPicks
+      .filter((p) => p.tenantId === tenantId && (opts?.status ? p.status === opts.status : true))
+      .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  },
+  async listUnsentTenantPicks(tenantId) {
+    return db.tenantPicks.filter((p) => p.tenantId === tenantId && !p.telegramSentAt);
+  },
+  async listPendingTenantPicks() {
+    return db.tenantPicks.filter((p) => p.status === "pending");
+  },
+  async markTenantPickSent(id) {
+    const p = db.tenantPicks.find((x) => x.id === id);
+    if (p) p.telegramSentAt = new Date().toISOString();
+  },
+  async gradeTenantPick(id, status, roi) {
+    const p = db.tenantPicks.find((x) => x.id === id);
+    if (p) {
+      p.status = status;
+      p.roi = roi;
+      p.settledAt = new Date().toISOString();
+    }
   },
 };

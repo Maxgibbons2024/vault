@@ -14,10 +14,81 @@ export const SPORTS: { id: Sport; label: string; icon: string }[] = [
 
 export type PlanId = "free" | "starter" | "pro";
 
-export type Role = "user" | "admin";
+export type Role = "user" | "tenant_admin" | "platform_admin";
+
+export type MarketKind = "h2h" | "totals";
+
+// A tipster's strategy — selects from the global opportunity pool.
+export interface Strategy {
+  sports: Sport[];
+  markets: MarketKind[];
+  minEdge: number; // %
+  minProb: number; // 0-1
+  maxProb: number; // 0-1
+  maxPicks: number; // cap shown/posted per cycle
+}
+
+// White-label branding for a tenant.
+export interface Brand {
+  brand: string; // primary hex
+  brandSoft: string;
+  accent: string;
+  logoText: string; // e.g. "SharpTips"
+  tagline?: string;
+}
+
+export interface Tenant {
+  id: string;
+  slug: string;
+  name: string;
+  status: "active" | "paused";
+  brand: Brand;
+  strategy: Strategy;
+  telegramBotToken?: string | null;
+  telegramChannelId?: string | null;
+  customDomain?: string | null;
+  createdAt: string;
+}
+
+export type PickStatus = "pending" | "won" | "lost" | "void";
+
+export interface TenantPick {
+  id: string;
+  tenantId: string;
+  eventId: string;
+  market: string;
+  bestPrice: number;
+  fairOdds: number;
+  edgePct: number;
+  confidence: number;
+  reasoning: string;
+  status: PickStatus;
+  roi: number;
+  createdAt: string;
+  telegramSentAt?: string | null;
+  settledAt?: string | null;
+}
+
+export const DEFAULT_STRATEGY: Strategy = {
+  sports: ["football", "tennis", "ufc"],
+  markets: ["h2h", "totals"],
+  minEdge: 5,
+  minProb: 0.1,
+  maxProb: 0.9,
+  maxPicks: 15,
+};
+
+export const DEFAULT_BRAND: Brand = {
+  brand: "#0ea5e9",
+  brandSoft: "#38bdf8",
+  accent: "#10b981",
+  logoText: "VaultBets",
+  tagline: "Find value before the market does.",
+};
 
 export interface User {
   id: string;
+  tenantId?: string | null;
   email: string;
   name: string;
   password: string; // demo only — plaintext seed; never do this in production
@@ -28,6 +99,7 @@ export interface User {
 export interface Subscription {
   id: string;
   userId: string;
+  tenantId?: string | null;
   plan: PlanId;
   status: "active" | "trialing" | "canceled";
   currentPeriodEnd: string;

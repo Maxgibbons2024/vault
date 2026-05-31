@@ -1,22 +1,25 @@
 import { getCurrentUser } from "@/lib/auth";
-import {
-  dashboardStats,
-  listEventsWithMeta,
-  performanceStats,
-} from "@/lib/store";
+import { performanceStats } from "@/lib/store";
+import { getTenant, tenantEventCards } from "@/lib/tenant";
 import { SectionHeading, StatCard, Badge, ButtonLink, Card } from "@/components/ui";
 import { MatchCard } from "@/components/match-card";
 import { SPORTS } from "@/lib/types";
 
 export default async function DashboardPage() {
-  const [user, stats, perf, rows] = await Promise.all([
-    getCurrentUser(),
-    dashboardStats(),
-    performanceStats(),
-    listEventsWithMeta(),
+  const [user, tenant] = await Promise.all([getCurrentUser(), getTenant()]);
+  const [perf, rows] = await Promise.all([
+    performanceStats(tenant?.id),
+    tenant ? tenantEventCards(tenant) : Promise.resolve([]),
   ]);
   const events = rows.map((r) => r.event);
   const featured = rows.slice(0, 6);
+  const today = new Date().toDateString();
+  const stats = {
+    eventsToday: events.filter((e) => new Date(e.startsAt).toDateString() === today).length,
+    analysisPublished: rows.length,
+    valueOpportunities: rows.reduce((s, r) => s + r.opportunities, 0),
+    sportsCovered: tenant?.strategy.sports.length ?? 0,
+  };
 
   return (
     <div className="space-y-10">

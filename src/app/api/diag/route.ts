@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { dbEnabled } from "@/lib/db";
 import { oddsApiEnabled } from "@/lib/providers/the-odds-api";
-import { telegramEnabled } from "@/lib/notify/telegram";
 import { anthropicEnabled } from "@/lib/ai/analysis";
+import { listTenants } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -47,10 +47,12 @@ async function handle(request: Request) {
     }
   }
 
+  const tenants = await listTenants();
   return NextResponse.json({
     db: dbEnabled,
     oddsApi: oddsApiEnabled,
-    telegram: telegramEnabled,
+    tenants: tenants.length,
+    tenantsWithTelegram: tenants.filter((t) => t.telegramBotToken && t.telegramChannelId).length,
     anthropic,
     baseUrl: !!process.env.NEXT_PUBLIC_BASE_URL,
   });

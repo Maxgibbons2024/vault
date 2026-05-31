@@ -4,9 +4,11 @@ import { cn } from "@/lib/format";
 export function Logo({
   className,
   href = "/",
+  name = "VaultBets",
 }: {
   className?: string;
   href?: string;
+  name?: string;
 }) {
   return (
     <Link
@@ -24,15 +26,18 @@ export function Logo({
           <path d="M9 9.5 11 12l4-4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </span>
-      <span className="text-lg tracking-tight text-ink">
-        Vault<span className="text-brand-soft">Bets</span>
-        <span className="ml-1 text-xs font-semibold text-accent-soft">AI</span>
-      </span>
+      <span className="text-lg tracking-tight text-ink">{name}</span>
     </Link>
   );
 }
 
-export function Disclaimer({ className }: { className?: string }) {
+export function Disclaimer({
+  className,
+  name = "This service",
+}: {
+  className?: string;
+  name?: string;
+}) {
   return (
     <p
       className={cn(
@@ -40,7 +45,7 @@ export function Disclaimer({ className }: { className?: string }) {
         className,
       )}
     >
-      <span className="font-semibold text-muted">Disclaimer:</span> VaultBets AI
+      <span className="font-semibold text-muted">Disclaimer:</span> {name}{" "}
       provides educational analysis and research only. Nothing on this website
       constitutes financial advice, betting advice, or a recommendation to place
       a wager. Users are responsible for their own decisions.

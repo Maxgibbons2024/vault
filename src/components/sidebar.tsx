@@ -20,10 +20,12 @@ export function Sidebar({
   user,
   plan,
   isAdmin,
+  brandName = "VaultBets",
 }: {
   user: { name: string };
   plan: string;
   isAdmin: boolean;
+  brandName?: string;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -80,7 +82,7 @@ export function Sidebar({
   const inner = (
     <div className="flex h-full flex-col gap-6 p-4">
       <div className="px-2 pt-2">
-        <Logo href="/dashboard" />
+        <Logo href="/dashboard" name={brandName} />
       </div>
 
       {links}
@@ -125,7 +127,7 @@ export function Sidebar({
     <>
       {/* Mobile top bar */}
       <div className="sticky top-0 z-40 flex items-center justify-between border-b border-border bg-bg/90 px-4 py-3 backdrop-blur md:hidden">
-        <Logo href="/dashboard" />
+        <Logo href="/dashboard" name={brandName} />
         <button
           onClick={() => setOpen((v) => !v)}
           aria-label="Toggle navigation"

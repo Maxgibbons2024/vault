@@ -15,5 +15,10 @@ export async function getCurrentUser(): Promise<User | null> {
 
 export async function isAdmin(): Promise<boolean> {
   const user = await getCurrentUser();
-  return user?.role === "admin";
+  return user?.role === "tenant_admin" || user?.role === "platform_admin";
+}
+
+export async function isPlatformAdmin(): Promise<boolean> {
+  const user = await getCurrentUser();
+  return user?.role === "platform_admin";
 }

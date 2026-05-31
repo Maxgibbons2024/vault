@@ -58,7 +58,7 @@ export default async function AdminSubscribersPage() {
                     <td className="whitespace-nowrap px-4 py-3 text-muted">{formatDate(u.createdAt, false)}</td>
                     <td className="px-4 py-3">
                       <Badge tone={plan === "free" ? "neutral" : "accent"}>{planLabel[plan]}</Badge>
-                      {u.role === "admin" && <Badge tone="brand" className="ml-2">Admin</Badge>}
+                      {u.role !== "user" && <Badge tone="brand" className="ml-2">Admin</Badge>}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-muted">£{planPrice[plan]}</td>
                     <td className="px-4 py-3">

@@ -7,6 +7,7 @@ import {
   seedOpportunities,
   seedResults,
   seedSubscriptions,
+  seedTenants,
   seedUsers,
 } from "../src/lib/seed";
 
@@ -15,12 +16,41 @@ const prisma = new PrismaClient();
 async function main() {
   console.log("Seeding VaultBets AI database…");
 
+  for (const t of seedTenants) {
+    await prisma.tenant.upsert({
+      where: { id: t.id },
+      update: {
+        name: t.name,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        brand: t.brand as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        strategy: t.strategy as any,
+        telegramBotToken: t.telegramBotToken ?? null,
+        telegramChannelId: t.telegramChannelId ?? null,
+      },
+      create: {
+        id: t.id,
+        slug: t.slug,
+        name: t.name,
+        status: t.status,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        brand: t.brand as any,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        strategy: t.strategy as any,
+        telegramBotToken: t.telegramBotToken ?? null,
+        telegramChannelId: t.telegramChannelId ?? null,
+        createdAt: new Date(t.createdAt),
+      },
+    });
+  }
+
   for (const u of seedUsers) {
     await prisma.user.upsert({
       where: { id: u.id },
-      update: {},
+      update: { role: u.role, tenantId: u.tenantId ?? null },
       create: {
         id: u.id,
+        tenantId: u.tenantId ?? null,
         email: u.email,
         name: u.name,
         password: u.password,
@@ -37,6 +67,7 @@ async function main() {
       create: {
         id: s.id,
         userId: s.userId,
+        tenantId: s.tenantId ?? null,
         plan: s.plan,
         status: s.status,
         currentPeriodEnd: new Date(s.currentPeriodEnd),

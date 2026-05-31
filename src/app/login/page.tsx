@@ -5,7 +5,14 @@ import { getCurrentUser } from "@/lib/auth";
 
 export default async function LoginPage() {
   const user = await getCurrentUser();
-  if (user) redirect(user.role === "admin" ? "/admin" : "/dashboard");
+  if (user)
+    redirect(
+      user.role === "platform_admin"
+        ? "/platform"
+        : user.role === "tenant_admin"
+          ? "/admin"
+          : "/dashboard",
+    );
 
   return (
     <AuthShell

@@ -9,19 +9,35 @@ import type { Repo } from "./repo/types";
 // the app imports only from here and never touches a backend directly.
 export const repo: Repo = dbEnabled ? prismaRepo : memoryRepo;
 
+/* -------------------------------- Tenants ------------------------------- */
+export const listTenants = () => repo.listTenants();
+export const getTenant = (id: string) => repo.getTenant(id);
+export const getTenantBySlug = (slug: string) => repo.getTenantBySlug(slug);
+export const createTenant: Repo["createTenant"] = (input) => repo.createTenant(input);
+export const updateTenant: Repo["updateTenant"] = (id, patch) =>
+  repo.updateTenant(id, patch);
+
 /* ----------------------------- Users / Auth ----------------------------- */
 export const getUserByEmail = (email: string) => repo.getUserByEmail(email);
 export const getUserById = (id: string) => repo.getUserById(id);
-export const listUsers = () => repo.listUsers();
-export const createUser = (input: { email: string; name: string; password: string }) =>
-  repo.createUser(input);
+export const listUsers = (tenantId?: string) => repo.listUsers(tenantId);
+export const createUser: Repo["createUser"] = (input) => repo.createUser(input);
 
 /* ----------------------------- Subscriptions ---------------------------- */
 export const getSubscriptionForUser = (userId: string) =>
   repo.getSubscriptionForUser(userId);
-export const listSubscriptions = () => repo.listSubscriptions();
+export const listSubscriptions = (tenantId?: string) => repo.listSubscriptions(tenantId);
 export const setPlanForUser = (userId: string, plan: PlanId) =>
   repo.setPlanForUser(userId, plan);
+
+/* ----------------------------- Tenant picks ----------------------------- */
+export const upsertTenantPick: Repo["upsertTenantPick"] = (p) => repo.upsertTenantPick(p);
+export const listTenantPicks: Repo["listTenantPicks"] = (t, o) => repo.listTenantPicks(t, o);
+export const listUnsentTenantPicks = (tenantId: string) => repo.listUnsentTenantPicks(tenantId);
+export const listPendingTenantPicks = () => repo.listPendingTenantPicks();
+export const markTenantPickSent = (id: string) => repo.markTenantPickSent(id);
+export const gradeTenantPick: Repo["gradeTenantPick"] = (id, s, roi) =>
+  repo.gradeTenantPick(id, s, roi);
 
 export async function hasPremiumAccess(userId?: string) {
   if (!userId) return false;
@@ -61,10 +77,6 @@ export const replaceOpportunitiesForEvent: Repo["replaceOpportunitiesForEvent"] 
 /* -------------------------------- Results ------------------------------- */
 export const listResults = () => repo.listResults();
 export const addResult: Repo["addResult"] = (row) => repo.addResult(row);
-
-/* ------------------------------ Sent alerts ----------------------------- */
-export const hasSentAlert = (key: string) => repo.hasSentAlert(key);
-export const recordSentAlert = (key: string) => repo.recordSentAlert(key);
 
 /* --------------------------- Composed reads ----------------------------- */
 export interface EventWithMeta {
@@ -116,28 +128,25 @@ export async function dashboardStats() {
   return { eventsToday, analysisPublished, valueOpportunities, sportsCovered };
 }
 
-export async function performanceStats() {
-  const results = await repo.listResults();
-  const settled = results.filter((r) => r.status !== "pending");
-  const wins = settled.filter((r) => r.status === "won").length;
-  const winRate = settled.length ? (wins / settled.length) * 100 : 0;
-  const totalRoi = settled.reduce((s, r) => s + r.roi, 0);
-  const avgRoi = settled.length ? totalRoi / settled.length : 0;
-  return {
-    settled: settled.length,
-    wins,
-    losses: settled.length - wins,
-    winRate,
-    totalRoi,
-    avgRoi,
-  };
+// Track record from settled picks. Tenant-scoped via TenantPick when a tenantId
+// is given; otherwise falls back to the legacy global Result table.
+export async function performanceStats(tenantId?: string) {
+  const settledRows = tenantId
+    ? (await repo.listTenantPicks(tenantId)).filter((p) => p.status === "won" || p.status === "lost")
+    : (await repo.listResults()).filter((r) => r.status !== "pending");
+  const wins = settledRows.filter((r) => r.status === "won").length;
+  const settled = settledRows.length;
+  const winRate = settled ? (wins / settled) * 100 : 0;
+  const totalRoi = settledRows.reduce((s, r) => s + r.roi, 0);
+  const avgRoi = settled ? totalRoi / settled : 0;
+  return { settled, wins, losses: settled - wins, winRate, totalRoi, avgRoi };
 }
 
-export async function revenueStats() {
+export async function revenueStats(tenantId?: string) {
   const price: Record<PlanId, number> = { free: 0, starter: 19, pro: 49 };
   const [subs, users] = await Promise.all([
-    repo.listSubscriptions(),
-    repo.listUsers(),
+    repo.listSubscriptions(tenantId),
+    repo.listUsers(tenantId),
   ]);
   const active = subs.filter((s) => s.status !== "canceled");
   const mrr = active.reduce((sum, s) => sum + price[s.plan], 0);

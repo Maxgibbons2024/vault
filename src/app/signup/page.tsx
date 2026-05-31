@@ -5,7 +5,7 @@ import { getCurrentUser } from "@/lib/auth";
 
 export default async function SignupPage() {
   const user = await getCurrentUser();
-  if (user) redirect(user.role === "admin" ? "/admin" : "/dashboard");
+  if (user) redirect(user.role === "user" ? "/dashboard" : "/admin");
 
   return (
     <AuthShell

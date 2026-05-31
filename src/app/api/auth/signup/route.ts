@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createUser, getUserByEmail } from "@/lib/store";
+import { cookies } from "next/headers";
+import { createUser, getTenantBySlug, getUserByEmail } from "@/lib/store";
 import { SESSION_COOKIE } from "@/lib/auth";
 
 export async function POST(request: Request) {
@@ -10,7 +11,10 @@ export async function POST(request: Request) {
   if (await getUserByEmail(email)) {
     return NextResponse.json({ error: "An account with that email already exists." }, { status: 409 });
   }
-  const user = await createUser({ email, password, name });
+  // Attach the new subscriber to the tenant they signed up under (proxy cookie).
+  const slug = (await cookies()).get("vb_tenant")?.value || "vaultbets";
+  const tenant = await getTenantBySlug(slug);
+  const user = await createUser({ email, password, name, tenantId: tenant?.id ?? null });
   const res = NextResponse.json({ ok: true, redirect: "/dashboard" });
   res.cookies.set(SESSION_COOKIE, user.id, {
     httpOnly: true,

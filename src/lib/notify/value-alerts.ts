@@ -1,100 +1,90 @@
-// Builds and posts value-opportunity alerts to Telegram. Idempotent via a stable
-// dedupe key (event externalId + market) stored in SentAlert, so re-runs never
-// repost the same pick even though Opportunity rows are recreated each ingest.
+// Per-tenant value alerts. For each active tenant: select picks from the global
+// pool by the tenant's strategy, record them as TenantPicks (dedupe + ledger),
+// and post any not-yet-sent picks to the tenant's own Telegram channel.
 
-import { sendTelegramMessage, telegramEnabled } from "./telegram";
+import { sendTelegram, tenantTelegram, escapeHtml } from "./telegram";
 import {
-  hasSentAlert,
   listEvents,
   listOpportunities,
-  recordSentAlert,
+  listTenants,
+  upsertTenantPick,
+  markTenantPickSent,
 } from "../store";
-import { SPORTS } from "../types";
+import { selectForTenant } from "../strategy";
+import { SPORTS, type Event } from "../types";
 import { formatDate } from "../format";
 
 export interface AlertSummary {
-  enabled: boolean;
-  candidates: number;
+  tenants: number;
+  picksRecorded: number;
   sent: number;
-  skipped: number;
-  notes: string[];
+  byTenant: Record<string, { recorded: number; sent: number }>;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+function pickMessage(event: Event, market: string, best: number, fair: number, edge: number, conf: number, link: string) {
+  const icon = SPORTS.find((s) => s.id === event.sport)?.icon ?? "🎯";
+  return [
+    `${icon} <b>${escapeHtml(event.homeName)} vs ${escapeHtml(event.awayName)}</b>`,
+    `🏆 ${escapeHtml(event.competition)} · ${formatDate(event.startsAt)}`,
+    `🎯 <b>${escapeHtml(market)}</b>`,
+    `💰 Best ${best.toFixed(2)}  ·  Fair ${fair.toFixed(2)}  ·  Edge <b>+${edge}%</b>  ·  Conf ${conf.toFixed(1)}/10`,
+    link ? `🔗 <a href="${link}">Full analysis</a>` : "",
+    `<i>Educational analysis only — not betting advice.</i>`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export async function runValueAlerts(): Promise<AlertSummary> {
-  const summary: AlertSummary = {
-    enabled: telegramEnabled,
-    candidates: 0,
-    sent: 0,
-    skipped: 0,
-    notes: [],
-  };
-  if (!telegramEnabled) {
-    summary.notes.push("TELEGRAM_BOT_TOKEN / TELEGRAM_CHANNEL_ID not set — skipped.");
-    return summary;
-  }
-
-  const minEdge = Number(process.env.TELEGRAM_MIN_EDGE) || 5;
-  const maxAlerts = Number(process.env.TELEGRAM_MAX_ALERTS) || 15;
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "";
-
-  const [events, opportunities] = await Promise.all([
+  const [tenants, events, opportunities] = await Promise.all([
+    listTenants(),
     listEvents(),
     listOpportunities(),
   ]);
-  const now = Date.now();
-  const eventById = new Map(events.map((e) => [e.id, e]));
+  const active = tenants.filter((t) => t.status === "active");
 
-  // Upcoming events only, opportunities at/above threshold, strongest first.
-  const candidates = opportunities
-    .map((op) => ({ op, event: eventById.get(op.eventId) }))
-    .filter(
-      (x) =>
-        x.event &&
-        new Date(x.event.startsAt).getTime() > now &&
-        x.op.edgePct >= minEdge,
-    )
-    .sort((a, b) => b.op.edgePct - a.op.edgePct)
-    .slice(0, maxAlerts);
+  const summary: AlertSummary = { tenants: active.length, picksRecorded: 0, sent: 0, byTenant: {} };
 
-  summary.candidates = candidates.length;
+  for (const tenant of active) {
+    const selections = selectForTenant(tenant.strategy, events, opportunities);
+    const creds = tenantTelegram(tenant.telegramBotToken, tenant.telegramChannelId);
+    let recorded = 0;
+    let sent = 0;
 
-  for (const { op, event } of candidates) {
-    if (!event) continue;
-    const key = `${event.externalId ?? event.id}:${op.market}`;
-    if (await hasSentAlert(key)) {
-      summary.skipped += 1;
-      continue;
+    for (const { opportunity: op, event } of selections) {
+      const pick = await upsertTenantPick({
+        tenantId: tenant.id,
+        eventId: event.id,
+        market: op.market,
+        bestPrice: op.bookmakerOdds,
+        fairOdds: op.fairOdds,
+        edgePct: op.edgePct,
+        confidence: op.confidence,
+        reasoning: op.reasoning,
+      });
+      recorded += 1;
+
+      // Send only picks not yet pushed to this tenant's channel.
+      if (creds && !pick.telegramSentAt) {
+        const link = baseUrl ? `${baseUrl}/t/${tenant.slug}/analysis/${event.id}` : "";
+        const ok = await sendTelegram(
+          creds,
+          pickMessage(event, op.market, op.bookmakerOdds, op.fairOdds, op.edgePct, op.confidence, link),
+        );
+        if (ok) {
+          await markTenantPickSent(pick.id);
+          sent += 1;
+          await sleep(150);
+        }
+      }
     }
-    const icon = SPORTS.find((s) => s.id === event.sport)?.icon ?? "🎯";
-    const link = baseUrl ? `${baseUrl}/analysis/${event.id}` : "";
-    const html = [
-      `${icon} <b>${escapeHtml(event.homeName)} vs ${escapeHtml(event.awayName)}</b>`,
-      `🏆 ${escapeHtml(event.competition)} · ${formatDate(event.startsAt)}`,
-      `🎯 <b>${escapeHtml(op.market)}</b>`,
-      `💰 Best ${op.bookmakerOdds.toFixed(2)}  ·  Fair ${op.fairOdds.toFixed(2)}  ·  Edge <b>+${op.edgePct}%</b>  ·  Conf ${op.confidence.toFixed(1)}/10`,
-      link ? `🔗 <a href="${link}">Full analysis</a>` : "",
-      `<i>Educational analysis only — not betting advice.</i>`,
-    ]
-      .filter(Boolean)
-      .join("\n");
 
-    const ok = await sendTelegramMessage(html);
-    if (ok) {
-      await recordSentAlert(key);
-      summary.sent += 1;
-      await sleep(150); // stay under Telegram per-chat rate limits
-    } else {
-      summary.notes.push(`send failed for ${key}`);
-    }
+    summary.picksRecorded += recorded;
+    summary.sent += sent;
+    summary.byTenant[tenant.slug] = { recorded, sent };
   }
 
   return summary;

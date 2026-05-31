@@ -2,10 +2,13 @@ import type {
   Analysis,
   Event,
   Opportunity,
+  PickStatus,
   PlanId,
   ResultRow,
   Sport,
   Subscription,
+  Tenant,
+  TenantPick,
   User,
 } from "../types";
 
@@ -13,16 +16,37 @@ import type {
 // an in-memory store (demo / no database) and a Prisma/Postgres store (live).
 // Everything is async so the backends are interchangeable.
 export interface Repo {
-  // users
+  // tenants
+  listTenants(): Promise<Tenant[]>;
+  getTenant(id: string): Promise<Tenant | undefined>;
+  getTenantBySlug(slug: string): Promise<Tenant | undefined>;
+  createTenant(input: Omit<Tenant, "id" | "createdAt">): Promise<Tenant>;
+  updateTenant(id: string, patch: Partial<Omit<Tenant, "id">>): Promise<Tenant | undefined>;
+
+  // users (scoped by tenant where relevant)
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserById(id: string): Promise<User | undefined>;
-  listUsers(): Promise<User[]>;
-  createUser(input: { email: string; name: string; password: string }): Promise<User>;
+  listUsers(tenantId?: string): Promise<User[]>;
+  createUser(input: {
+    email: string;
+    name: string;
+    password: string;
+    tenantId?: string | null;
+    role?: User["role"];
+  }): Promise<User>;
 
   // subscriptions
   getSubscriptionForUser(userId: string): Promise<Subscription | undefined>;
-  listSubscriptions(): Promise<Subscription[]>;
+  listSubscriptions(tenantId?: string): Promise<Subscription[]>;
   setPlanForUser(userId: string, plan: PlanId): Promise<Subscription | undefined>;
+
+  // tenant picks (per-tenant ledger: dedupe + telegram state + track record)
+  upsertTenantPick(pick: Omit<TenantPick, "id" | "createdAt" | "status" | "roi" | "telegramSentAt" | "settledAt">): Promise<TenantPick>;
+  listTenantPicks(tenantId: string, opts?: { status?: PickStatus }): Promise<TenantPick[]>;
+  listUnsentTenantPicks(tenantId: string): Promise<TenantPick[]>;
+  listPendingTenantPicks(): Promise<TenantPick[]>;
+  markTenantPickSent(id: string): Promise<void>;
+  gradeTenantPick(id: string, status: PickStatus, roi: number): Promise<void>;
 
   // events
   listEvents(sport?: Sport): Promise<Event[]>;
@@ -47,11 +71,7 @@ export interface Repo {
     ops: Omit<Opportunity, "id" | "eventId">[],
   ): Promise<void>;
 
-  // results
+  // results (legacy global track record; superseded per-tenant by TenantPick)
   listResults(): Promise<ResultRow[]>;
   addResult(row: Omit<ResultRow, "id">): Promise<ResultRow>;
-
-  // sent alerts (Telegram dedupe)
-  hasSentAlert(key: string): Promise<boolean>;
-  recordSentAlert(key: string): Promise<void>;
 }

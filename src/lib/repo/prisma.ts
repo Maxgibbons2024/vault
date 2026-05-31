@@ -2,13 +2,18 @@ import type { Repo } from "./types";
 import type {
   Analysis,
   AnalysisSection,
+  Brand,
   Event,
   Opportunity,
+  PickStatus,
   PlanId,
   ResultRow,
   ResultStatus,
   Sport,
+  Strategy,
   Subscription,
+  Tenant,
+  TenantPick,
   User,
 } from "../types";
 import { prisma } from "../db";
@@ -18,8 +23,39 @@ import { prisma } from "../db";
 const db = prisma!;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+const toTenant = (r: any): Tenant => ({
+  id: r.id,
+  slug: r.slug,
+  name: r.name,
+  status: r.status as Tenant["status"],
+  brand: r.brand as Brand,
+  strategy: r.strategy as Strategy,
+  telegramBotToken: r.telegramBotToken ?? null,
+  telegramChannelId: r.telegramChannelId ?? null,
+  customDomain: r.customDomain ?? null,
+  createdAt: r.createdAt.toISOString(),
+});
+
+const toTenantPick = (r: any): TenantPick => ({
+  id: r.id,
+  tenantId: r.tenantId,
+  eventId: r.eventId,
+  market: r.market,
+  bestPrice: r.bestPrice,
+  fairOdds: r.fairOdds,
+  edgePct: r.edgePct,
+  confidence: r.confidence,
+  reasoning: r.reasoning,
+  status: r.status as PickStatus,
+  roi: r.roi,
+  createdAt: r.createdAt.toISOString(),
+  telegramSentAt: r.telegramSentAt ? r.telegramSentAt.toISOString() : null,
+  settledAt: r.settledAt ? r.settledAt.toISOString() : null,
+});
+
 const toUser = (r: any): User => ({
   id: r.id,
+  tenantId: r.tenantId ?? null,
   email: r.email,
   name: r.name,
   password: r.password,
@@ -30,6 +66,7 @@ const toUser = (r: any): User => ({
 const toSub = (r: any): Subscription => ({
   id: r.id,
   userId: r.userId,
+  tenantId: r.tenantId ?? null,
   plan: r.plan as PlanId,
   status: r.status as Subscription["status"],
   currentPeriodEnd: r.currentPeriodEnd.toISOString(),
@@ -86,6 +123,49 @@ const toResult = (r: any): ResultRow => ({
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 export const prismaRepo: Repo = {
+  async listTenants() {
+    return (await db.tenant.findMany({ orderBy: { createdAt: "asc" } })).map(toTenant);
+  },
+  async getTenant(id) {
+    const r = await db.tenant.findUnique({ where: { id } });
+    return r ? toTenant(r) : undefined;
+  },
+  async getTenantBySlug(slug) {
+    const r = await db.tenant.findUnique({ where: { slug } });
+    return r ? toTenant(r) : undefined;
+  },
+  async createTenant(input) {
+    const r = await db.tenant.create({
+      data: {
+        slug: input.slug,
+        name: input.name,
+        status: input.status,
+        brand: input.brand as any,
+        strategy: input.strategy as any,
+        telegramBotToken: input.telegramBotToken ?? null,
+        telegramChannelId: input.telegramChannelId ?? null,
+        customDomain: input.customDomain ?? null,
+      },
+    });
+    return toTenant(r);
+  },
+  async updateTenant(id, patch) {
+    const r = await db.tenant.update({
+      where: { id },
+      data: {
+        slug: patch.slug,
+        name: patch.name,
+        status: patch.status,
+        brand: patch.brand as any,
+        strategy: patch.strategy as any,
+        telegramBotToken: patch.telegramBotToken,
+        telegramChannelId: patch.telegramChannelId,
+        customDomain: patch.customDomain,
+      },
+    });
+    return toTenant(r);
+  },
+
   async getUserByEmail(email) {
     const r = await db.user.findUnique({ where: { email } });
     return r ? toUser(r) : undefined;
@@ -94,8 +174,13 @@ export const prismaRepo: Repo = {
     const r = await db.user.findUnique({ where: { id } });
     return r ? toUser(r) : undefined;
   },
-  async listUsers() {
-    return (await db.user.findMany({ orderBy: { createdAt: "desc" } })).map(toUser);
+  async listUsers(tenantId) {
+    return (
+      await db.user.findMany({
+        where: tenantId ? { tenantId } : undefined,
+        orderBy: { createdAt: "desc" },
+      })
+    ).map(toUser);
   },
   async createUser(input) {
     const r = await db.user.create({
@@ -103,9 +188,11 @@ export const prismaRepo: Repo = {
         email: input.email,
         name: input.name,
         password: input.password,
-        role: "user",
+        role: input.role ?? "user",
+        tenantId: input.tenantId ?? null,
         subscription: {
           create: {
+            tenantId: input.tenantId ?? null,
             plan: "free",
             status: "trialing",
             currentPeriodEnd: new Date(Date.now() + 14 * 864e5),
@@ -120,8 +207,10 @@ export const prismaRepo: Repo = {
     const r = await db.subscription.findUnique({ where: { userId } });
     return r ? toSub(r) : undefined;
   },
-  async listSubscriptions() {
-    return (await db.subscription.findMany()).map(toSub);
+  async listSubscriptions(tenantId) {
+    return (
+      await db.subscription.findMany({ where: tenantId ? { tenantId } : undefined })
+    ).map(toSub);
   },
   async setPlanForUser(userId, plan: PlanId) {
     const r = await db.subscription.upsert({
@@ -245,14 +334,59 @@ export const prismaRepo: Repo = {
     return toResult(r);
   },
 
-  async hasSentAlert(key) {
-    return !!(await db.sentAlert.findUnique({ where: { key } }));
+  async upsertTenantPick(pick) {
+    const where = {
+      tenantId_eventId_market: {
+        tenantId: pick.tenantId,
+        eventId: pick.eventId,
+        market: pick.market,
+      },
+    };
+    const r = await db.tenantPick.upsert({
+      where,
+      update: {
+        bestPrice: pick.bestPrice,
+        fairOdds: pick.fairOdds,
+        edgePct: pick.edgePct,
+        confidence: pick.confidence,
+        reasoning: pick.reasoning,
+      },
+      create: {
+        tenantId: pick.tenantId,
+        eventId: pick.eventId,
+        market: pick.market,
+        bestPrice: pick.bestPrice,
+        fairOdds: pick.fairOdds,
+        edgePct: pick.edgePct,
+        confidence: pick.confidence,
+        reasoning: pick.reasoning,
+      },
+    });
+    return toTenantPick(r);
   },
-  async recordSentAlert(key) {
-    await db.sentAlert.upsert({
-      where: { key },
-      update: {},
-      create: { key },
+  async listTenantPicks(tenantId, opts) {
+    return (
+      await db.tenantPick.findMany({
+        where: { tenantId, ...(opts?.status ? { status: opts.status } : {}) },
+        orderBy: { createdAt: "desc" },
+      })
+    ).map(toTenantPick);
+  },
+  async listUnsentTenantPicks(tenantId) {
+    return (
+      await db.tenantPick.findMany({ where: { tenantId, telegramSentAt: null } })
+    ).map(toTenantPick);
+  },
+  async listPendingTenantPicks() {
+    return (await db.tenantPick.findMany({ where: { status: "pending" } })).map(toTenantPick);
+  },
+  async markTenantPickSent(id) {
+    await db.tenantPick.update({ where: { id }, data: { telegramSentAt: new Date() } });
+  },
+  async gradeTenantPick(id, status, roi) {
+    await db.tenantPick.update({
+      where: { id },
+      data: { status, roi, settledAt: new Date() },
     });
   },
 };
